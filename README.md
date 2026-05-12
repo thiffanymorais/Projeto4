@@ -12,6 +12,8 @@
 
 # Dashboard de Indicadores Cannoli - Foodtech
 
+https://dashboard-web-canolli360.streamlit.app
+
 ## 👥 Grupo: TechTonics
 
 ## Integrantes
