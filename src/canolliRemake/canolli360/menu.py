@@ -112,6 +112,59 @@ def render_header(store, storeorder):
     return periodo, restaurante, canal, pedido, df_loja
 
 
+def render_header_campanhas(store, campaignxorder):
+    """Header simplificado para a página de Campanhas.
+
+    Expõe apenas os filtros relevantes para CAMPAIGNXORDER:
+    período (baseado em sent_at) e loja. Canal e tipo de pedido
+    não se aplicam a campanhas e ficam fora desta tela.
+    Retorna (periodo, restaurante) no mesmo formato que render_header.
+    """
+
+    # organizando infos de período a partir de sent_at
+    datas = pd.to_datetime(campaignxorder["sent_at"], errors="coerce").dt.to_period("M")
+    lista_periodo = ["Todos"] + sorted(
+        datas.dropna().astype(str).unique().tolist(),
+        reverse=True,
+    )
+
+    # organizando infos de loja
+    lista_lojas = store["name"].dropna().unique().tolist()
+    lista_lojas.insert(0, "Todas")
+
+    with st.container():
+        st.markdown("<style>div.block-container{padding-top:2rem;}</style>", unsafe_allow_html=True)
+        st.markdown('<div class="header">', unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([2, 2, 2])
+
+        with col1:
+            st.markdown("### Canolli Foodtech")
+
+        with col2:
+            if "periodo_camp" not in st.session_state or st.session_state.periodo_camp not in lista_periodo:
+                st.session_state.periodo_camp = lista_periodo[0]
+
+            periodo = st.selectbox(
+                "Período",
+                lista_periodo,
+                key="periodo_camp",
+            )
+
+        with col3:
+            if "restaurante_camp" not in st.session_state:
+                st.session_state.restaurante_camp = "Todas"
+
+            restaurante = st.selectbox(
+                "Loja",
+                lista_lojas,
+                key="restaurante_camp",
+            )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    return periodo, restaurante
+
+
 def render_sidebar():
     if "menu_ativo" not in st.session_state:
         st.session_state.menu_ativo = "Visão geral"

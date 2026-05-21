@@ -1,12 +1,11 @@
 import math
-import altair as alt
 import numpy as np
 import pandas as pd
 from paths import DATA_DIR, PACKAGE_DIR
 
-# ==========================================
-# 1. FUNÇÕES AUXILIARES E FILTROS
-# ==========================================
+
+#region FUNÇÕES AUXILIARES E FILTROS
+
 def _calcular_inicio(data_max, periodo):
     """Calcula a data inicial com base no período selecionado."""
     if periodo == "Última semana":
@@ -43,9 +42,10 @@ def formatar_moeda(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-# ==========================================
-# 2. MÉTRICAS E CÁLCULOS DE VENDAS
-# ==========================================
+
+
+#region  MÉTRICAS E CÁLCULOS DE VENDAS
+
 def receita_total(df):
     """Calcula a receita total para pedidos concluídos (status 16)."""
     return df[df['status'] == 16]['totalamount'].sum()
@@ -91,9 +91,9 @@ def valor_per_mes(StoreOrder, periodo):
     return valor_por_mes
 
 
-# ==========================================
-# 3. CAMPANHAS E ENGAJAMENTO
-# ==========================================
+
+#region CAMPANHAS E ENGAJAMENTO
+
 
 def campanhas_por_loja(campaignxorder, campaign, store):
     """Volume de mensagens de campanha por loja (para gráficos de engajamento)."""
@@ -125,23 +125,135 @@ def taxa_conversao_campanha(campaignxorder: pd.DataFrame) -> tuple[float, float,
     
     return taxa, rec_conv, n_env, n_conv
 
-
+#region diabo encarnado
 def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
     """Limites inferiores e superiores (~95%) da taxa de conversão em %."""
+
+    # evita divisão inválida
     if n <= 0:
         return (0.0, 0.0)
-        
+
+    # garante que essa bomba não exploda 
+    if successes < 0:
+        successes = 0
+
+    if successes > n:
+        successes = n
+
     p = successes / n
+
     denom = 1 + z**2 / n
     centre = (p + z**2 / (2 * n)) / denom
-    rad = z * math.sqrt((p * (1 - p) + z**2 / (4 * n)) / n) / denom
-    
-    return max(0.0, (centre - rad) * 100), min(100.0, (centre + rad) * 100)
+
+    rad = (z * math.sqrt((p * (1 - p) + z**2 / (4 * n)) / n)/ denom) #porque professor?? porque??
+
+    lo = max(0.0, (centre - rad) * 100)
+    hi = min(100.0, (centre + rad) * 100)
+
+    return lo, hi
 
 
-# ==========================================
-# 4. ANÁLISE AVANÇADA (RFM) E GRÁFICOS
-# ==========================================
+def filtrar_periodo_mes(df: pd.DataFrame, periodo: str, coluna_data: str) -> pd.DataFrame:
+    """Filtra o DataFrame pelo período no formato 'YYYY-MM' vindo do menu.render_header.
+
+    Complementa filtrar_periodo() que aceita strings como 'Último mês'.
+    Retorna o df inteiro quando periodo == 'Todos'.
+    """
+    df = df.copy()
+    df[coluna_data] = pd.to_datetime(df[coluna_data], errors="coerce")
+    if periodo == "Todos":
+        return df
+    try:
+        p = pd.Period(periodo, freq="M")
+        mask = df[coluna_data].dt.to_period("M") == p
+        return df[mask]
+    except Exception:
+        return df
+
+
+def ranking_campanhas(
+    campaignxorder: pd.DataFrame, campaign: pd.DataFrame
+) -> pd.DataFrame:
+    """Ranking de campanhas com métricas individuais de conversão e receita.
+
+    Retorna um DataFrame com uma linha por campanha contendo:
+    name, type, sendat, n_enviadas, n_conversoes, taxa_conversao, receita_conv.
+    """
+    env = campaignxorder[campaignxorder["status"] == 2].groupby("campaignid").agg(
+        n_enviadas=("message_id", "count")
+    )
+    conv = campaignxorder[campaignxorder["status"] == 4].groupby("campaignid").agg(
+        n_conversoes=("message_id", "count"),
+        receita_conv=("totalamount", "sum"),
+    )
+    df = env.join(conv, how="outer").fillna(0).reset_index()
+    df["taxa_conversao"] = df.apply(
+        lambda r: (r["n_conversoes"] / r["n_enviadas"] * 100) if r["n_enviadas"] > 0 else 0.0,
+        axis=1,
+    )
+
+    cols_camp = [c for c in ["campaignid", "templateid", "name", "type", "sendat"] if c in campaign.columns]
+    camp_dedup = campaign[cols_camp].drop_duplicates(subset=["campaignid"] if "campaignid" in cols_camp else cols_camp[:1])
+
+    id_col = "campaignid" if "campaignid" in camp_dedup.columns else "templateid"
+    df = df.merge(camp_dedup, left_on="campaignid", right_on=id_col, how="left")
+
+    if "name" not in df.columns:
+        df["name"] = df["campaignid"].apply(lambda x: f"Campanha {x}")
+    df["name"] = df["name"].fillna(df["campaignid"].apply(lambda x: f"Campanha {x}"))
+
+    return df.sort_values("taxa_conversao", ascending=False).reset_index(drop=True)
+
+
+def campanhas_por_loja_detalhado(
+    campaignxorder: pd.DataFrame, store: pd.DataFrame
+) -> pd.DataFrame:
+    """Métricas de conversão cruzando campanha × loja.
+
+    Retorna um DataFrame com colunas:
+    campaignid, storeid, nome_loja, n_enviadas, n_conversoes, taxa_conversao, receita_conv.
+    """
+    env = (
+        campaignxorder[campaignxorder["status"] == 2]
+        .groupby(["campaignid", "storeid"], as_index=False)
+        .agg(n_enviadas=("message_id", "count"))
+    )
+    conv = (
+        campaignxorder[campaignxorder["status"] == 4]
+        .groupby(["campaignid", "storeid"], as_index=False)
+        .agg(n_conversoes=("message_id", "count"), receita_conv=("totalamount", "sum"))
+    )
+    df = env.merge(conv, on=["campaignid", "storeid"], how="outer").fillna(0)
+    df["taxa_conversao"] = df.apply(
+        lambda r: (r["n_conversoes"] / r["n_enviadas"] * 100) if r["n_enviadas"] > 0 else 0.0,
+        axis=1,
+    )
+    df = df.merge(store[["id", "name"]].rename(columns={"name": "nome_loja"}),
+                  left_on="storeid", right_on="id", how="left")
+    df["nome_loja"] = df["nome_loja"].fillna("—")
+    return df.sort_values(["campaignid", "taxa_conversao"], ascending=[True, False]).reset_index(drop=True)
+
+
+
+
+def resumo_loja(df_lojas: pd.DataFrame, store: pd.DataFrame) -> pd.DataFrame:
+    """Resumo por loja: total de mensagens, conversões, taxa e receita."""
+    df = (
+        df_lojas.groupby("nome_loja", as_index=False)
+        .agg(
+            n_enviadas=("n_enviadas", "sum"),
+            n_conversoes=("n_conversoes", "sum"),
+            receita_conv=("receita_conv", "sum"),
+            n_campanhas=("campaignid", "nunique"),
+        )
+    )
+    df["taxa_conversao"] = df.apply(
+        lambda r: r["n_conversoes"] / r["n_enviadas"] * 100 if r["n_enviadas"] > 0 else 0.0,
+        axis=1,
+    )
+    return df.sort_values("n_enviadas", ascending=False).reset_index(drop=True)
+
+# region ANÁLISE AVANÇADA (RFM) E GRÁFICOS
 
 def calcular_rfm(storeorder: pd.DataFrame, periodo: str, store: pd.DataFrame) -> pd.DataFrame:
     """RFM (Recência, Frequência, Valor) em pedidos concluídos (status 16).
@@ -218,4 +330,3 @@ def calcular_rfm(storeorder: pd.DataFrame, periodo: str, store: pd.DataFrame) ->
 
     g["segmento"] = g.apply(_segmento, axis=1)
     return g
-

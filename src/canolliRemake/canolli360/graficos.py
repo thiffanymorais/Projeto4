@@ -115,3 +115,82 @@ texto = alt.Chart(
 
 
 grafico_final = texto + grafico2 + grafico3 + grafico4 + grafico 
+
+
+
+# ── gráficos Altair para campanhas ─────────────────────────────────────────
+
+def _altair_barras_h(
+    df: pd.DataFrame,
+    col_label: str,
+    col_valor: str,
+    titulo: str,
+    cor: str = "#7F77DD",
+    formato_valor: str = ".1f",
+    sufixo: str = "%",
+) -> alt.Chart:
+    """Gráfico de barras horizontais Altair genérico para rankings de campanha."""
+    df = df.copy()
+    df[col_label] = df[col_label].astype(str).str[:30]
+    chart = (
+        alt.Chart(df, title=titulo)
+        .mark_bar(color=cor, cornerRadiusEnd=4)
+        .encode(
+            x=alt.X(col_valor, title=None, axis=alt.Axis(grid=False, labels=False, ticks=False)),
+            y=alt.Y(col_label, sort="-x", title=None, axis=alt.Axis(labelLimit=160)),
+            tooltip=[
+                alt.Tooltip(col_label, title="Campanha"),
+                alt.Tooltip(col_valor, title=titulo, format=formato_valor),
+            ],
+        )
+        .properties(height=180)
+        .configure_view(strokeWidth=0)
+        .configure_axis(labelFontSize=12, domainWidth=0)
+        .configure_title(fontSize=13, anchor="start", fontWeight=500)
+    )
+    return chart
+
+
+def graf_top5_taxa_conversao(df_ranking: pd.DataFrame) -> alt.Chart:
+    """Top 5 campanhas por taxa de conversão (barras horizontais, roxo)."""
+    top = df_ranking.nlargest(5, "taxa_conversao")[["name", "taxa_conversao"]].copy()
+    return _altair_barras_h(top, "name", "taxa_conversao", "Top 5 — maior taxa de conversão", "#7F77DD", ".1f", "%")
+
+
+def graf_bottom5_taxa_conversao(df_ranking: pd.DataFrame) -> alt.Chart:
+    """Bottom 5 campanhas por taxa de conversão (barras horizontais, vermelho)."""
+    bot = df_ranking.nsmallest(5, "taxa_conversao")[["name", "taxa_conversao"]].copy()
+    return _altair_barras_h(bot, "name", "taxa_conversao", "Bottom 5 — menor taxa de conversão", "#E24B4A", ".1f", "%")
+
+
+def graf_top5_receita(df_ranking: pd.DataFrame) -> alt.Chart:
+    """Top 5 campanhas por receita atribuída (barras horizontais, verde)."""
+    top = df_ranking.nlargest(5, "receita_conv")[["name", "receita_conv"]].copy()
+    return _altair_barras_h(top, "name", "receita_conv", "Top 5 — maior receita atribuída", "#1D9E75", ",.0f", "")
+
+
+def graf_bottom5_receita(df_ranking: pd.DataFrame) -> alt.Chart:
+    """Bottom 5 campanhas por receita atribuída (barras horizontais, laranja)."""
+    bot = df_ranking.nsmallest(5, "receita_conv")[["name", "receita_conv"]].copy()
+    return _altair_barras_h(bot, "name", "receita_conv", "Bottom 5 — menor receita atribuída", "#BA7517", ",.0f", "")
+
+
+def graf_mensagens_por_loja(df_lojas: pd.DataFrame) -> alt.Chart:
+    """Barras horizontais: mensagens enviadas por loja."""
+    df = df_lojas.groupby("nome_loja", as_index=False)["n_enviadas"].sum()
+    df = df.sort_values("n_enviadas", ascending=False).head(15)
+    return _altair_barras_h(df, "nome_loja", "n_enviadas", "Mensagens enviadas por loja", "#7F77DD", ",.0f", "")
+
+
+def graf_conversao_por_loja(df_lojas: pd.DataFrame) -> alt.Chart:
+    """Barras horizontais: taxa de conversão média por loja."""
+    df = (
+        df_lojas.groupby("nome_loja", as_index=False)
+        .apply(lambda g: pd.Series({
+            "taxa_conversao": (g["n_conversoes"].sum() / g["n_enviadas"].sum() * 100)
+            if g["n_enviadas"].sum() > 0 else 0.0
+        }))
+        .reset_index(drop=True)
+    )
+    df = df.sort_values("taxa_conversao", ascending=False).head(15)
+    return _altair_barras_h(df, "nome_loja", "taxa_conversao", "Taxa de conversão por loja", "#1D9E75", ".1f", "%")
